@@ -66,9 +66,13 @@ for element in production:
 # read price from yaml file
 kwhprice = comener['pricing']['kwhprice'] 
 normalfee = comener['pricing']['normalfee']
-#starttime = "2024-06-30T22:00:00Z"
-#endtime = "2024-12-29T21:59:59Z"
-# convert to UTC time
+network = comener['pricing']['network']
+consumerprice = comener['pricing']['consumerprice']
+tax = comener['pricing']['tax']
+compensation = comener['pricing']['compensation']
+tva = comener['pricing']['tva']
+tvamul = 1 + tva
+kwhpriceCons = (consumerprice + network + tax + compensation) * tvamul 
 
 # get data from producers
 dataframesproducers = {}
@@ -77,12 +81,13 @@ all_dataprod = []
 for producer in production:
     meterid = producer['meteringPoint']
     obiscode = producer['obiscode']
+    # create GET request for the Leneda Platform
     url = comener['leneda']['url']+comener['leneda']['api']['meteringData']+meterid+"/time-series?startDateTime="+starttime+"&endDateTime="+endtime+"&obisCode="+obiscode
     headers = {
     comener['leneda']['energyId']['header']: comener['leneda']['energyId']['value'],
     comener['leneda']['apiKey']['header']: comener['leneda']['apiKey']['value'],
     }
-    df_name = f"df-prod-{producer['name']}"   # dynamically crerate a name for the dataframe, based on the name of the person
+    df_name = f"df-prod-{producer['name']}"   # dynamically create a name for the dataframe, based on the name of the person
     response = requests.get(url, headers=headers)
     df = pd.DataFrame(response.json())
     df['value'] = df['items'].apply(lambda x: x['value'])
@@ -105,7 +110,7 @@ timestamp_sums.columns = ['startedAt', 'total_sum_prod']
 combined_dfprod = combined_dfprod.merge(timestamp_sums, on='startedAt')
 
 # Calculate percentages
-combined_dfprod['percentage_prod'] = (combined_dfprod['valueprod'] / combined_dfprod['total_sum_prod'] * 100).round(2)
+combined_dfprod['percentage_prod'] = (combined_dfprod['valueprod'] / combined_dfprod['total_sum_prod'] * 100).round(3)
 
 # Update individual dataframes with percentages
 for df_name in dataframesproducers.keys():
@@ -164,7 +169,7 @@ timestamp_sums.columns = ['startedAt', 'total_sum_cons']
 combined_dfcons = combined_dfcons.merge(timestamp_sums, on='startedAt')
 
 # Calculate percentages
-combined_dfcons['percentage_cons'] = (combined_dfcons['valuecons'] / combined_dfcons['total_sum_cons'] * 100).round(2)
+combined_dfcons['percentage_cons'] = (combined_dfcons['valuecons'] / combined_dfcons['total_sum_cons'] * 100).round(3)
 
 # Update individual dataframes with percentages
 for df_name in dataframesconsumers.keys():
@@ -188,66 +193,63 @@ summarycons['total_sum_cons'] = timestamp_sums['total_sum_cons']
 
 # now we have the data for the producers and the consumers, and we can merge the two by using the commun key, which is startedAT
 merged_df = pd.merge(summarycons, summaryprod, on='startedAt')
-# we store the files as csv to check the data manually
 
+# we store the files as csv to check the data manually
 summarycons.to_csv('consumption.csv', index=False)
 summaryprod.to_csv('production.csv', index=False)
 
-
 # at this point, we may make the calculations ie define what amount of consumed energy was produced and by whom
 # then we calculate the total amount of money to be transfered by whom to who
-#example of such a line to be used to calculate
-#startedAt	percentage_cons	percentage_cons	value	value	total_sum_cons	percentage_prod	percentage_prod	value	value	total_sum_prod																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																					
-#	df-cons-christian	df-cons-marc	df-cons-christian	df-cons-marc		df-prod-marc	df-prod-véronique	df-prod-marc	df-prod-véronique																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																						
-#2024-10-23 06:15:00+00:00	2.65	97.35	112	4.12	4232	0.0	100.0	0.0	312	312																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																					
-#2024-10-23 06:30:00+00:00	8.51	91.49	132	1.42	1552	0.0	100.0	0.0	1096	1096																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																					
+# 																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																					
 # first we calculate the percentage of the power used compared to the power consumed
 merged_df['cons_vs_prod'] = (merged_df['total_sum_prod'] / merged_df['total_sum_cons'] * 100).round(2)
 # we now limit this value at 100%, as power not consumed will not be paid
 merged_df['cons_vs_prod_limit'] = merged_df['cons_vs_prod'].apply(lambda x: 100 if x > 100  else x)
 merged_df['max_possible_cons_tot'] = merged_df['total_sum_cons'] * (merged_df['cons_vs_prod_limit'] / 100)
-merged_df.to_csv('merged.csv', index=False)
-name = 'marc'
-#print(merged_df['value'][f"df-cons-{consumer['name']}"])
-#print(merged_df['value'][f"df-cons-{name}"])
 # algorithm
 # !!!! we need to calculate the power available in the community, for the moment calculations are based on the total required power
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-# calculate total to be paid
+# calculate total to be paid:
+# total consumed, but to a maximum of produced energy, multiplied by the price and divided by 4 (in order to transform power in energy for a 15 min slot)
 merged_df['total_to_be_paid'] = (merged_df['total_sum_cons'] * (merged_df['cons_vs_prod_limit'] / 100) * kwhprice / 4)
-# now calculate the prorate for each pconsumer to pay
-totalPowerFromCommunity = 0
+# now calculate the prorate for each consumer to pay
+totalEnergyFromCommunity = 0
 count = 0
 print("--------------------")
-print(f"During the period from {starttime} to {endtime}, the following data are generated")
+print(f"During the period from {starttime} to {endtime}, the following data have been generated:")
 for consumer in consumption:
     count = count + 1
     df_name = f"df-cons-{consumer['name']}"
+    # we calculate the share of consumed energy, produced by the community, per consumer
     merged_df[f"community_power_used-{consumer['name']}"] = merged_df['max_possible_cons_tot'] * (merged_df['percentage_cons'][df_name] / 100)
+    # we add the consumed energy per consumer to get a total, if this is the first consumer, we create the column
     if count == 1:
         merged_df["power_used_by_community"] = merged_df[f"community_power_used-{consumer['name']}"]
     else : 
         merged_df["power_used_by_community"] = merged_df["power_used_by_community"] + merged_df[f"community_power_used-{consumer['name']}"]
-    merged_df.to_csv(f"merged{count}.csv", index=False)
-    power_used = merged_df[f"community_power_used-{consumer['name']}"].sum()/4
-    totalPowerFromCommunity = totalPowerFromCommunity + power_used
-    totalPowerUsed = merged_df['valuecons'][df_name].sum()/4
-    print(f"{consumer['name']} has used {power_used:.3f} kWh from available power out of o total consumption of {totalPowerUsed:.3f}")
+    energy_used = merged_df[f"community_power_used-{consumer['name']}"].sum()/4
+    totalEnergyFromCommunity = totalEnergyFromCommunity + energy_used
+    totalEnergyUsed = merged_df['valuecons'][df_name].sum()/4
+    print(f"{consumer['name']} has used {energy_used:.3f} kWh from available power out of o total consumption of {totalEnergyUsed:.3f}")
     merged_df[f"has_to_pay-{consumer['name']}"] = (merged_df['total_to_be_paid'] * (merged_df['percentage_cons'][df_name] / 100))
     totalEur = merged_df[f"has_to_pay-{consumer['name']}"].sum()
+    difference = ((totalEur/ kwhprice) * kwhpriceCons) - totalEur
     totalkWh = merged_df['valuecons'][df_name].sum() / 4
-    print(f"{consumer['name']} has to pay {totalEur:.3f} EUR for a total of {power_used:.3f} kWh from community")
+    print(f"{consumer['name']} has to pay {totalEur:.3f} EUR for a total of {energy_used:.3f} kWh from community this is {difference:.3f} less than the fee to be paid by the provider ({(difference/totalEur)*100:.2f} %)")
 merged_df["power_sold_to_grid"] = merged_df["total_sum_prod"] - merged_df["power_used_by_community"]
 total_produced = merged_df["total_sum_prod"].sum()/4
 total_sold_to_community = merged_df["power_used_by_community"].sum() / 4
 total_sold_to_grid = merged_df["power_sold_to_grid"].sum() / 4
-print(f"The community consumers consumed {total_sold_to_community:.3f} kWh from the total available power of {total_produced:.3f} kWh and sold {total_sold_to_grid:.3f} kWh to Grid ")
-print(f"The community generated internal income of {total_sold_to_community * (kwhprice - normalfee):.2f} EUR (internal fee - normal fee)")
+print(f"The community consumers consumed {total_sold_to_community:.3f} kWh from the total available energy of {total_produced:.3f} kWh and sold {total_sold_to_grid:.3f} kWh to Grid ")
+print(f"The community generated internal income for producers of {total_sold_to_community * (kwhprice - normalfee):.2f} EUR (internal fee - normal fee)")
+print(f"the community generated an internal saving for consumers of {total_sold_to_community * (kwhpriceCons - kwhprice):.2f} EUR")
 for producer in production:
     df_name = f"df-prod-{producer['name']}"
     #merged_df['has_to_receive'][df_name] = (merged_df['total_to_be_paid'] * (merged_df['percentage_prod'][df_name] / 100))
     merged_df[f"has_to_receive-{producer['name']}"] = (merged_df['total_to_be_paid'] * (merged_df['percentage_prod'][df_name] / 100))
     totalEur = merged_df[f"has_to_receive-{producer['name']}"].sum()
-    print(f"{producer['name']} will receive {totalEur:.2f} EUR ")
+    difference = totalEur - ((totalEur/ kwhprice) * normalfee)
+    print(f"{producer['name']} will receive {totalEur:.2f} EUR this is {difference:.3f} more than the fee received by the provider ({(difference/totalEur)*100:.2f} %)")
 print("--------------------")
+# save the csv file for further analysis
 merged_df.to_csv('merged.csv', index=False)

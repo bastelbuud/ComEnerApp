@@ -1,0 +1,38 @@
+consumers:
+  #for each name, there mus be also one smartmeterId, and one obiscode
+  names: ["<name of consumer 1>", "<name of consumer 2>, ..., "<name of consumer x>"]
+  smartmeters:
+    [
+      "LU0000010637xxxxxxxxx",
+      "LU0000010637yyyyyyyyy",
+      .
+      .
+      .
+      "LU0000010637zzzzzzzz",
+    ]
+obiscode: ["1-1:1.29.0", "1-1:1.29.0", "1-1:1.29.0"]
+  
+producers:
+  #for each name, there mus be also one smartmeterId, and one obiscode
+  names: ["<name of producer 1>", ..., "<name of producer x>"]
+  smartmeters:
+    [
+    "LU0000010637aaaaaaaaaa",
+    .
+    .
+    .
+     "LU0000010637ddddddddd"]
+  obiscode: ["1-65:2.29.9", "1-1:2.29.0"]
+leneda:
+  url: "https://api.leneda.lu"
+  energyId:
+    header: "X-ENERGY-ID"
+    value: "<your Leneda Id>"
+  apiKey:
+    header: "X-API-KEY"
+    value: "<your Leneda API Key"
+  api:
+    meteringData: "/api/metering-points/" #{meteringPointCode}/time-series"
+pricing:
+  kwhprice: 0.11
+  normalfee: 0.07

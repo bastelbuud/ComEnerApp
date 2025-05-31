@@ -1,0 +1,63 @@
+consumers:
+  names:
+    [
+      "Véronique",
+      "Christian",
+      "Marc",
+      "Reinhilde",
+      "Gaby_Haus",
+      "Gaby_Hall",
+      "Tina",
+      "Pit",
+    ]
+  smartmeters:
+    [
+      "LU0000010637000000000000070xxxxx",
+      "LU0000010637000000000000070yyyyy",
+      "LU0000010637000000000000070zzzzz",
+      "LU0000010637000000000000070ttttt",
+      "LU0000010637000000000000070sssss",
+      "LU0000010637000000000000070rrrrr",
+      "LU0000010637000000000000070qqqqq",
+      "LU0000010637000000000000070ppppp",
+    ]
+  obiscode:
+    [
+      "1-65:1.29.2",
+      "1-65:1.29.2",
+      "1-65:1.29.2",
+      "1-65:1.29.2",
+      "1-65:1.29.2",
+      "1-65:1.29.2",
+      "1-65:1.29.2",
+      "1-65:1.29.2",
+    ]
+
+producers:
+  names: ["Véronique", "Marc", "Gaby", "Pit"]
+  smartmeters:
+    [
+      "LU000001063700000000000077xxxxxxxx",
+      "LU000001063700000000000077yyyyyyyy",
+      "LU000001063700000000000077zzzzzz",
+      "LU000001063700000000000077tttttt",
+    ]
+  obiscode: ["1-65:2.29.2", "1-65:2.29.2", "1-65:2.29.2", "1-65:2.29.2"]
+leneda:
+  url: "https://api.leneda.lu"
+  energyId:
+    header: "X-ENERGY-ID"
+    value: "Mein Energy Id vun Lenada"
+  apiKey:
+    header: "X-API-KEY"
+    value: "Meng Api Key vun Leneda"
+  api:
+    meteringData: "/api/metering-points/" #{meteringPointCode}/time-series"
+pricing:
+  kwhprice: 0.11 # price agrred on between members
+  normalfee: 0.07 # price paid for the produced energy
+  network: 0.0759 # network fee
+  consumerprice: 0.15 # price paid by the consumer (energyrevolt)
+  tax: 0.0010
+  compensation: -0.0376 #Preisdeckel
+  tva: 0.08 # 8%

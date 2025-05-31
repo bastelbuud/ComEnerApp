@@ -1,3 +1,4 @@
+# this version is to be used if obis codes are the ones related to the CEL (1-65:1.29.2 resp. 1-65:2.29.2)
 import yaml
 import pandas as pd
 import requests
@@ -17,6 +18,12 @@ parser = argparse.ArgumentParser(
     description='Generate ISO format datetime strings for month ranges with UTC timezone an get the data from that period from Leneda'
 )
 
+parser.add_argument(
+    '-g', '--groupeDePartageNumber',
+    type=str,
+    required=True,
+    help='What yaml file to use (example : CR00006041)'
+)
 parser.add_argument(
     '-y', '--year',
     type=int,
@@ -61,8 +68,14 @@ if args.weather == True:
 else:
     checkweather = False
 
+print(args)
+
+datapath = "/Users/marcdurbach/Development/python/ComEner-calculator/data"
+configpath = "/Users/marcdurbach/Development/python/ComEner-calculator/configs"
+yamlFileToUse = configpath+"/"+args.groupeDePartageNumber+".yaml"
+groupeDePartage = args.groupeDePartageNumber
 # generate timestring to prefix file names
-ftimestr = time.strftime("%Y%m%d")
+ftimestr = time.strftime("%Y%m%d-%H")
 # api to get sunrise and sunset
 sunApi = "https://api.sunrisesunset.io/json?lat=49.819294&lng=6.274638&date=2024-07-01&time_format=24"
 #generate start and end datetime strings 
@@ -70,8 +83,8 @@ starttime, endtime = generate_date_range(args.year, args.month, args.end_month)
 print(f"Start datetime: {starttime}")
 print(f"End datetime: {endtime}")
 # read config file
-csv_data = [["Nom", "Consommation", "a payer","a recevoir"]]
-with open('config.yaml', 'r') as file:
+csv_data = [["Nom", "Consommation", "a payer","Production","a recevoir"]]
+with open(yamlFileToUse, 'r') as file:
     comener = yaml.safe_load(file)
 # get consumers data from config file
 consumers = comener['consumers']['names']
@@ -114,6 +127,7 @@ for producer in production:
     obiscode = producer['obiscode']
     # create GET request for the Leneda Platform
     url = comener['leneda']['url']+comener['leneda']['api']['meteringData']+meterid+"/time-series?startDateTime="+starttime+"&endDateTime="+endtime+"&obisCode="+obiscode
+    print("producer url : ",url)
     headers = {
     comener['leneda']['energyId']['header']: comener['leneda']['energyId']['value'],
     comener['leneda']['apiKey']['header']: comener['leneda']['apiKey']['value'],
@@ -171,6 +185,7 @@ for consumer in consumption:
     meterid = consumer['meteringPoint']
     obiscode = consumer['obiscode']
     url = comener['leneda']['url']+comener['leneda']['api']['meteringData']+meterid+"/time-series?startDateTime="+starttime+"&endDateTime="+endtime+"&obisCode="+obiscode
+    print("consumer url : ",url)
     headers = {
     comener['leneda']['energyId']['header']: comener['leneda']['energyId']['value'],
     comener['leneda']['apiKey']['header']: comener['leneda']['apiKey']['value'],
@@ -224,8 +239,8 @@ summarycons['total_sum_cons'] = timestamp_sums['total_sum_cons']
 merged_df = pd.merge(summarycons, summaryprod, on='startedAt')
 
 # we store the files as csv to check the data manually
-summarycons.to_csv(f'{ftimestr}-consumption.csv', index=False, sep=";")
-summaryprod.to_csv(f'{ftimestr}production.csv', index=False, sep=";")
+summarycons.to_csv(f'{datapath}/{groupeDePartage}-{ftimestr}-consumption.csv', index=False, sep=";")
+summaryprod.to_csv(f'{datapath}/{groupeDePartage}-{ftimestr}production.csv', index=False, sep=";")
 
 # at this point, we may make the calculations ie define what amount of consumed energy was produced and by whom
 # then we calculate the total amount of money to be transfered by whom to who
@@ -266,7 +281,7 @@ for consumer in consumption:
     totalkWh = merged_df['valuecons'][df_name].sum() / 4
     print(f"{consumer['name']} has to pay {totalEur:.3f} EUR for a total of {energy_used:.3f} kWh from community, this is {difference:.3f} less than the fee to be paid to the provider ({(difference/totalEur)*100:.2f} %)")
     # add line to array
-    csv_data.append([consumer['name'], energy_used, totalEur])
+    csv_data.append([consumer['name'], round(energy_used, 2), round(totalEur,2)])
 merged_df["power_sold_to_grid"] = merged_df["total_sum_prod"] - merged_df["power_used_by_community"]
 total_produced = merged_df["total_sum_prod"].sum()/4
 total_sold_to_community = merged_df["power_used_by_community"].sum() / 4
@@ -278,28 +293,32 @@ for producer in production:
     df_name = f"df-prod-{producer['name']}"
     print(df_name)
     #merged_df['has_to_receive'][df_name] = (merged_df['total_to_be_paid'] * (merged_df['percentage_prod'][df_name] / 100))
+    energy_produced = merged_df['valueprod'][df_name].sum()/4
     merged_df[f"has_to_receive-{producer['name']}"] = (merged_df['total_to_be_paid'] * (merged_df['percentage_prod'][df_name] / 100))
     totalEur = merged_df[f"has_to_receive-{producer['name']}"].sum()
     difference = totalEur - ((totalEur/ kwhprice) * normalfee)
     print(f"{producer['name']} will receive {totalEur:.2f} EUR, this is {difference:.3f} more than the fee received by the provider ({(difference/totalEur)*100:.2f} %)")
-    csv_data.append([producer['name'],0,0,totalEur)])
+    csv_data.append([producer['name'], 0, 0, round(energy_produced, 2), round(totalEur, 2)])
 print("--------------------")
-merged_df.to_csv(f'{ftimestr}-merged.csv', index=False, sep=";")
+merged_df.to_csv(f'{datapath}/{groupeDePartage}-{ftimestr}-merged.csv', index=False, sep=";")
+# Now we vill add sums for Total Production, Total Consumption and Total Sharing
+# with this formula : sum_rows = df.sum(axis=1) the total will be divided by 4 to get kWh
+
 # now enrich the dataset with the sunset and sunrise data
 # loop through the datetime column and add a boolean if the sun is visible
 if checkDaylightUsage:
     print("We are now retrieving tha data for daylight production analyses")
     print("This will take a long time based on the selected timerange")
     df_with_visibility = get_sun_visibility(merged_df,'startedAt')
-    df_with_visibility.to_csv('withsun.csv', index=False)
+    df_with_visibility.to_csv(f'{datapath}/{groupeDePartage}-withsun.csv', index=False)
     merged_df["sun_visible"] = df_with_visibility["sun_visible"]
     #or
     #merged_df = merged_df.merge(df_with_visibility[['startedAt', 'sun_visible']], on='startedAt')
     # save the csv file for further analysis
     # conditional sums based on : daylight_sum = df[df['daylight'] == True]['energy_consumption'].sum()
-    merged_df.to_csv(f'{ftimestr}-merged_withsun.csv', index=False, sep=";")
+    merged_df.to_csv(f'{datapath}/{groupeDePartage}-{ftimestr}-merged_withsun.csv', index=False, sep=";")
     #now make the analyses for day and night consumption
-    df = pd.read_csv(f'{ftimestr}-merged_withsun.csv',sep=";")
+    df = pd.read_csv(f'{datapath}/{groupeDePartage}-{ftimestr}-merged_withsun.csv',sep=";")
 
     # View the first 5 rows
     df.head()
@@ -324,7 +343,7 @@ if checkweather:
     merged_df['day_of_week'] = merged_df['startedAt'].dt.dayofweek
     merged_df['day_of_year'] = merged_df['startedAt'].dt.dayofyear
     print("generating the merged_df_days.csv file")
-    merged_df.to_csv(f'{ftimestr}-merged_df_days.csv', index=False, sep=";")
+    merged_df.to_csv(f'{datapath}/{groupeDePartage}-{ftimestr}-merged_df_days.csv', index=False, sep=";")
     df_with_weather = process_data(merged_df,'startedAt')
     #merged_df.merge(df_with_weather, on='startedAt')   : this does not work, however, adding each column individually works fine 
     merged_df["temperature"]=  df_with_weather["temperature"]
@@ -334,9 +353,18 @@ if checkweather:
     merged_df["snowfall"]=  df_with_weather["snowfall"]
     merged_df["cloud_cover"]=  df_with_weather["cloud_cover"]
     print("generating the merged_weather.csv file")
-    merged_df.to_csv(f'{ftimestr}-merged_weather.csv', index=False, sep=";")
+    merged_df.to_csv(f'{datapath}/{groupeDePartage}-{ftimestr}-merged_weather.csv', index=False, sep=";")
 # generate csv file as summary
-with open(f"decompte-{starttime}-{endtime}", 'w', newline='') as csv_file:
+# Create clean versions for filename
+if isinstance(starttime, str):
+    file_start = starttime.split('T')[0]
+    file_end = endtime.split('T')[0]
+else:
+    file_start = starttime.strftime('%Y-%m-%d')
+    file_end = endtime.strftime('%Y-%m-%d')
+decomptefilename = f"{datapath}/{groupeDePartage}-decompte-{file_start}_{file_end}.csv"
+
+with open(decomptefilename, 'w', newline='') as csv_file:
     csv_writer = csv.writer(csv_file, delimiter=';')
 
     csv_writer.writerows(csv_data) 
